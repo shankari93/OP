@@ -1,0 +1,123 @@
+
+WITH raw_data AS (
+  SELECT
+    '' AS 'Customer ID',
+    dm.name AS 'Chart ID',
+    member_id AS 'Member ID',
+    patient_last_name AS 'Member Last Name', 
+    patient_first_name AS 'Member First Name',
+    SUBSTRING_INDEX(patient_first_name, '_', -1) AS 'Member Name',
+    patient_gender AS Gender,
+    DATE_FORMAT(em.patient_birth_date, '%m/%d/%Y') AS DOB,
+    DATE_FORMAT(dd.encounter_actual_period_start, '%m/%d/%Y') AS DOS,
+    dd.encounter_actual_period_start AS d_dos,
+    condition_code AS 'ICD Code',
+    condition_code_description AS 'Code Description',
+    GROUP_CONCAT(DISTINCT cms_hcc_v28_group_name SEPARATOR ';') AS 'HCC Code (V28)',
+    GROUP_CONCAT(DISTINCT cms_hcc_v28_group_description SEPARATOR ';') AS 'HCC Description',
+    GROUP_CONCAT(DISTINCT rxhcc_hcc_group_name SEPARATOR ';') AS 'RxHCC Code',
+    GROUP_CONCAT(DISTINCT rxhcc_hcc_group_description SEPARATOR ';') AS 'RxHCC Description',
+    GROUP_CONCAT(DISTINCT CASE WHEN is_indicator <> 1 THEN de.evidence_text END SEPARATOR ';') AS 'Condition Evidence',
+    GROUP_CONCAT(DISTINCT CONCAT(meat_category, '-', dev.evidence_text) SEPARATOR ';') AS 'Meat Evidence',	
+    GROUP_CONCAT(DISTINCT CASE WHEN is_indicator = 1 and page_num=dem.document_page_no THEN de.evidence_text END SEPARATOR ';') AS Indicators,
+        GROUP_CONCAT(DISTINCT CASE WHEN is_indicator = 1  THEN deM.document_page_no END SEPARATOR ';') AS temp,
+                GROUP_CONCAT(DISTINCT CASE WHEN is_indicator = 1  THEN page_num END SEPARATOR ';') AS temp1,
+    
+    claim_status AS Category,
+    pm.name
+  FROM 
+    encounter_mst em 
+  INNER JOIN 
+    document_mst dm ON dm.encounter_id = em.id
+  INNER JOIN 
+    document_dos dd ON dd.document_id = dm.id
+  LEFT JOIN 
+    project_mst pm ON pm.id = em.project_id
+  INNER JOIN 
+    document_code dc ON dc.document_dos_id = dd.id
+  LEFT JOIN 
+    document_code_evidence_map dcem ON dcem.document_code_id = dc.id AND dcem.is_active = 1
+  LEFT JOIN 
+    document_evidence de ON de.id = dcem.document_evidence_id
+  LEFT JOIN 
+    document_evidence_coordinates dem ON dem.document_evidence_id = de.id
+  LEFT JOIN 
+    document_mst dm1 ON dm1.id = de.document_id
+  LEFT JOIN 
+    document_code_cms_hcc_v28_group_map cch ON cch.document_code_id = dc.id AND cch.is_active = 1
+  LEFT JOIN 
+    document_code_meat_evidence_map ccem1 ON ccem1.document_code_id = dc.id 
+  LEFT JOIN 
+    document_evidence dev ON dev.id = ccem1.document_evidence_id
+  LEFT JOIN 
+    document_evidence_coordinates dec0 ON dec0.document_evidence_id = dev.id
+  LEFT JOIN 
+    document_code_rxhcc_hcc_group_map ccr ON ccr.document_code_id = dc.id 
+  LEFT JOIN 
+    encounter_status_map es ON es.encounter_id = em.id
+  LEFT JOIN
+   DOCUMENT_PROCESSING_DETAIL DPD ON EM.ID= dpd.encounter_id
+  LEFT JOIN 
+  nlp_v1_service.REQUEST_MST RM on RM.TOKEN=DPD.DOCUMENT_PROCESSING_TOKEN
+  LEFT jOIN 
+  nlp_v1_service.prospective_audit_request_map par on par.prospective_request_id=rm.id
+  LEFT JOIN 
+  nlp_v1_service.document_mst doc ON doc.request_id=audit_request_id
+  LEFT JOIN 
+  nlp_v1_service.DOS_MST DoM ON DoM.REQUESt_ID=doc.request_id and DoM.encounter_actual_period_start=dd.encounter_actual_period_start
+  LEFT JOIN 
+  nlp_v1_service.dos_document_page_map DP ON DP.encounter_identifier=dom.id
+  left join 
+  nlp_v1_service.document_page_detail dpdl on dpdl.id=document_page_id  
+  WHERE  
+    (cms_hcc_v28_group_name IS NOT NULL OR rxhcc_hcc_group_name IS NOT NULL)
+    AND em.project_id = 115 
+  GROUP BY 
+    member_id, dd.encounter_actual_period_start, condition_code
+),
+
+d_dos_concat AS (
+  SELECT 
+    `Member ID`,
+    `ICD Code`,
+    
+    GROUP_CONCAT(DISTINCT DATE_FORMAT(d_dos, '%m/%d/%Y') ORDER BY d_dos SEPARATOR ',') AS `All DOS (Tab Separated)`,
+
+    -- Year presence flags as TRUE / FALSE
+    CASE WHEN MAX(YEAR(d_dos) = 2021) = 1 THEN 'TRUE' ELSE 'FALSE' END AS has_2021,
+    CASE WHEN MAX(YEAR(d_dos) = 2022) = 1 THEN 'TRUE' ELSE 'FALSE' END AS has_2022,
+    CASE WHEN MAX(YEAR(d_dos) = 2023) = 1 THEN 'TRUE' ELSE 'FALSE' END AS has_2023,
+    CASE WHEN MAX(YEAR(d_dos) = 2024) = 1 THEN 'TRUE' ELSE 'FALSE' END AS has_2024
+
+  FROM raw_data
+  GROUP BY `Member ID`, `ICD Code`
+)
+,
+
+
+ranked_data AS (
+  SELECT 
+    r.*, 
+    d.`All DOS (Tab Separated)`,
+    d.has_2021, d.has_2022, d.has_2023, d.has_2024,
+    ROW_NUMBER() OVER (
+      PARTITION BY r.`Member ID`, r.`ICD Code`
+      ORDER BY 
+        CASE r.Category
+          WHEN 'RECAPTURED_CONDITION' THEN 1
+          WHEN 'SUSPECTING_CARE_GAPS' THEN 2
+          WHEN 'SUSPECTING' THEN 3
+          ELSE 4
+        END,
+        STR_TO_DATE(r.DOS, '%m/%d/%Y') DESC
+    ) AS rn
+  FROM raw_data r
+  LEFT JOIN d_dos_concat d
+    ON r.`Member ID` = d.`Member ID` AND r.`ICD Code` = d.`ICD Code`
+)
+
+SELECT *,'https://prospective.raapidinc.com/worklist' as 'Raapid Platform URL'
+FROM ranked_data
+WHERE rn = 1  and category='SUSPECTING' \G;
+
+  

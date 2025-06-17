@@ -1,0 +1,158 @@
+SELECT V.FileName,
+A.`Completed On`,
+`Claim Id`,
+lob as 'Line of Business',
+`Member Id`,
+MemberFirstName as 'Member Name Last',
+MemberFirstName 'Member Name First',
+null 'Member Middle Name',
+MemberDOB DOB,
+MemberGender 'GENDER' ,
+ChaseID 'Chase ID',
+ChaseProviderNPI `Chase Provider ID`,
+ChaseProviderLastName 'Chase Provider Last Name',
+ChaseProviderFirstName 'Chase Provider First Name',
+ChaseProviderNPI 'Chase Provider NPI',
+ChaseProviderSpecialty 'Chase Provider Specialty' ,
+`Visit Type` ,
+`From DOS`,
+`To DOS`,
+`provider id` 'Diagnosing Provider NPI',
+`Diagnosing Provider Name First`,
+`Diagnosing Provider Name Last`,
+DIAG,`
+V24 HCC1`,
+`V24 HCC2`,
+`V28 HCC1`,
+`V28 HCC2`,
+`Page No`,
+RESULTS 'EDS Results' FROM 
+																																																																									 (SELECT DISTINCT
+    main_query.File_Name as 'File Name',
+     main_query.completed_on as 'Completed On',
+     NULL as  'Claim Id',
+     main_query.member_id as 'Member id',
+      REPLACE(main_query.main_query.member_full_name,'_',' ') as 'Member Full Name',
+     main_query.DOB as DOB,
+     main_query.age as Age,  
+     main_query.gender as Gender,
+     main_query.Visit_Type as 'Visit Type',
+     main_query.from_dos as 'From DOS',
+     main_query.from_dos as 'To DOS',
+      coalesce(REGEXP_SUBSTR(dos_comment,'[0-9]{10}'),case when LENGTH(main_query.npi) <> 10 THEN NULL ELSE main_query.npi END
+	      ) as  'Provider ID',REGEXP_SUBSTR(dos_comment,'[0-9]{10}') temp_npi,
+     dos , 
+    provider_first_name 'Diagnosing Provider Name First',
+     provider_LAST_name 'Diagnosing Provider Name Last',
+     CASE 
+        WHEN main_query.FROM_DOS IS NULL THEN (
+            SELECT TRIM(dic.comments) 
+            FROM encounter_mst em 
+            INNER JOIN discussion_mst di ON di.encounter_id = em.id 
+            INNER JOIN discussion_comment dic ON dic.discussion_id = di.id 
+            WHERE main_query.id = em.id AND di.is_active = 1 
+            ORDER BY dic.created_date DESC LIMIT 1
+        ) 
+        ELSE main_query.DOS_COMMENT 
+    END
+     AS 'Comment Field 1',  
+     REPLACE(main_query.code, '.', '') as Diag,
+     REPLACE(main_query.HCC1,'HCC','') as 'V24 HCC1',
+     REPLACE(main_query.V28_HCC1,'HCC','') as 'V28 HCC1',
+     Case when main_query.HCC1=main_query.HCC2 then null ELSE REPLACE(main_query.HCC2,'HCC','') END as 'V24 HCC2',
+     Case when main_query.V28_HCC1=main_query.V28_HCC2 then null ELSE REPLACE(main_query.V28_HCC2,'HCC','') END as 'V28 HCC2',
+     main_query.evidence as evidence,
+     main_query.document_page_no as 'Page No',
+     main_query.Results
+     
+FROM
+(
+SELECT
+    e.project_id,
+    p.name as proj,
+    e.id as id,
+    d.name AS file_name,
+    DATE_FORMAT(es.last_coding_date, '%m/%d/%Y') AS completed_on,
+    '' AS claim_id,
+    d.patient_identifier member_id,   
+    patient_first_name as member_full_name,
+    DATE_FORMAT(e.patient_birth_date, '%m/%d/%Y') AS DOB,
+    TIMESTAMPDIFF(YEAR, e.patient_birth_date, CURDATE()) AS age,
+    e.patient_gender AS gender,
+    v.name as Visit_Type,
+    DATE_FORMAT(ed.encounter_actual_period_start, '%m/%d/%Y') AS From_DOS,
+    ed.encounter_actual_period_start dos,
+    ed.encounter_practitioner_identifier npi,
+    ed.encounter_practitioner_first_name AS provider_first_name,
+    ed.encounter_practitioner_last_name AS provider_last_name,
+    COALESCE(
+    GROUP_CONCAT(DISTINCT ec.comment SEPARATOR ', '), 
+    GROUP_CONCAT( DISTINCT CASE 
+        WHEN  esc.standard_comment  = 'Other/Enter your own text' 
+        THEN ed.comment 
+        ELSE esc.standard_comment END SEPARATOR ',')
+   
+) AS 'DOS_COMMENT',
+
+    c.condition_code AS code,
+    MAX(CASE WHEN hcc_group_name is not null THEN hcc_group_name END) AS HCC1,
+    MIN(CASE WHEN hcc_group_name is not null  THEN hcc_group_name END) AS HCC2,
+    MAX(CASE WHEN cms_hcc_v28_group_name is not null THEN cms_hcc_v28_group_name END) AS V28_HCC1,
+    MIN(CASE WHEN cms_hcc_v28_group_name is not null THEN cms_hcc_v28_group_name END) AS V28_HCC2, 
+       de.evidence_text as evidence,
+    de.evidence_begin,      
+   
+    case WHEN c.status='ACCEPTED' THEN 'ADD' 
+         ELSE NULL
+         END AS  Results,
+         document_page_no
+FROM
+    encounter_mst e
+INNER JOIN
+    document_mst d ON e.id = d.encounter_id
+INNER JOIN
+    encounter_status_map es ON es.encounter_id = e.id
+LEFT JOIN
+    user_details ud ON ud.id = es.user_details_id
+LEFT JOIN 
+    encounter_dos ed ON ed.encounter_id = e.id AND ed.is_Active=1 AND ed.process_id =2 and ed.status='Accepted'
+LEFT JOIN
+     ra_audit_apigateway.encounter_dos_comment ec on ec.encounter_dos_id =ed.id  and ec.encounter_id=e.id 
+LEFT JOIN  
+    ra_audit_apigateway.visit_type_mst v on v.id =ed.visit_type_id
+LEFT JOIN 
+    ra_audit_apigateway.document_dos dd on dd.document_id=d.id and ed.document_dos_id=dd.id and ed.document_dos_id=dd.id and claim_document_dos_id=dd.id
+LEFT JOIN
+    ra_audit_apigateway.cm_code c ON c.encounter_id = e.id AND c.encounter_dos_id = ed.id AND c.is_active = 1 and c.status='Accepted' and c.is_auto_accept =0
+LEFT JOIN 
+     ra_audit_apigateway.document_code dc on dc.id=c.document_code_id
+LEFT JOIN
+    ra_audit_apigateway.project_mst p ON e.project_id = p.id
+LEFT JOIN
+    ra_audit_apigateway.cm_code_hcc_group_map ch ON ch.cm_code_id = c.id
+LEFT JOIN 
+    ra_audit_apigateway.cm_code_cms_hcc_v28_group_map chv on chv.cm_code_id=c.id AND (hcc_group_name IS NOT NULL AND cms_hcc_v28_group_name IS NOT NULL)
+lEFT JOIN 
+     ra_audit_apigateway.cm_code_evidence_map ccem ON ccem.cm_code_id = c.id and ccem.is_active = 1
+LEFT JOIN 
+     ra_audit_apigateway.document_evidence de ON de.id = ccem.document_evidence_id 
+LEFT JOIN 
+     ra_audit_apigateway.document_evidence_coordinates dec_alias ON dec_alias.document_evidence_id = de.id
+LEFT JOIN
+     ra_audit_apigateway.encounter_dos_standard_comment esc on esc.encounter_dos_id =ed.id  and esc.encounter_id=e.id 
+
+WHERE
+    e.is_active = 1
+    AND d.is_active = 1
+    AND encounter_status_id IN (9) 
+    AND es.is_active = 1
+    AND es.process_id = 2    AND p.id in (508)
+group by e.id, ed.encounter_actual_period_start, ed.dos_status,ed.encounter_practitioner_identifier,c.condition_code
+
+
+   ) as main_query
+   GROUP BY main_query.file_name, main_query.from_dos, main_query.code,main_query.npi)A
+   
+   LEFT JOIN CUSTOMER_CLAIMS.vatica_manifest_1011 V ON `MEMBER ID` =MemberID
+   
+    

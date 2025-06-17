@@ -1,0 +1,38 @@
+select
+'' as  'Customer ID',
+ dm.name 'Chart ID' ,
+member_id 'Member ID',
+patient_last_name 'Member Last Name', 
+patient_first_name 'Member First Name',
+patient_gender Gender,
+DATE_FORMAT(em.patient_birth_date, '%m/%d/%Y') AS DOB,
+DATE_FORMAT(ed.encounter_actual_period_start, '%m/%d/%Y') AS DOS,
+condition_code 'ICD Code',
+condition_code_description 'Code Description',
+group_concat(distinct cms_hcc_v28_group_name SEPARATOR ';') 'HCC Code (V28)' ,
+group_concat(distinct cms_hcc_v28_group_desc SEPARATOR ';') 'HCC Description',
+group_concat(distinct rxhcc_hcc_group_name SEPARATOR ';') 'RxHCC Code',
+group_concat(distinct cms_hcc_v28_group_desc SEPARATOR ';') 'RxHCC Description',
+group_concat(distinct case when is_indicator <>1 then de.evidence_text end  SEPARATOR ';') 'Condition Evidence',
+group_concat(distinct  concat(meat_category,'-',dev.evidence_text ) SEPARATOR ';') 'Meat Evidence',	
+group_concat(distinct case when is_indicator =1 then de.evidence_text end SEPARATOR ';') Indicators,
+claim_status Category,pm.name 
+from 
+encounter_mst em 
+inner join 
+encounter_dos ed on ed.encounter_id=em.id
+left join project_mst pm on pm.id =em.project_id
+inner join cm_code cm on cm.encounter_dos_id =ed.id
+left join cm_code_evidence_map ccem on ccem.cm_code_id =cm.id AND CCEM.IS_ACTIVE=1
+left join document_evidence de on de.id=ccem.document_evidence_id
+left join document_evidence_coordinates decd on decd.document_evidence_id=de.id
+left join document_mst dm on dm.id=de.document_id
+left join cm_code_cms_hcc_v28_group_map cch on cch.cm_code_id=cm.id AND CCH.IS_ACTIVE=1 and cm.status='Accepted'
+left join cm_code_meat_evidence_map ccem1 on ccem1.cm_code_id =cm.id AND CCEM.IS_ACTIVE=1 and cm.process_id=2
+left join document_evidence dev on dev.id=ccem1.document_evidence_id
+left join document_evidence_coordinates dec0 on dec0.document_evidence_id=dev.id
+left join cm_code_rxhcc_hcc_group_map ccr  on ccr.cm_code_id=cm.id 
+left join encounter_status_map es on es.encounter_id=em.id
+where encounter_status_id=8 and es.process_id=2 and cm.status='Accepted' and cm.is_active=1 AND PM.CLIENT_ID=9 AND CM.IS_SUPPRESSED=0 AND (cms_hcc_v28_group_name IS NOT NULL OR rxhcc_hcc_group_name IS NOT NULL) and
+group by member_id,condition_code limit 100 \G;
+

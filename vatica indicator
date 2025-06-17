@@ -1,0 +1,119 @@
+update document_code_evidence_map set is_active=null where id in (	select distinct id from (SELECT distinct 
+	    em.member_id AS 'Member ID',
+	    dd.encounter_actual_period_start,
+	    condition_code AS 'ICD Code',dcem.id,   
+	    de.evidence_text   
+	  FROM 
+	    encounter_mst em 
+	  INNER JOIN 
+	    document_mst dm ON dm.encounter_id = em.id
+	  INNER JOIN 
+	    document_dos dd ON dd.document_id = dm.id
+	  LEFT JOIN 
+	    project_mst pm ON pm.id = em.project_id
+	  INNER JOIN 
+	    document_code dc ON dc.document_dos_id = dd.id AND DC.IS_ACTIVE=1 
+	  LEFT JOIN 
+	    document_code_evidence_map dcem ON dcem.document_code_id = dc.id  AND DCEM.IS_aCTIVE=1
+	  LEFT JOIN 
+	    document_evidence de ON de.id = dcem.document_evidence_id
+	  inner join 
+	   	claims.vatica_indicator VI on vi.member_id =em.member_id and dos=dd.encounter_actual_period_start and condition_code=icd_code    	
+	   	and vi.removed_indicator COLLATE utf8mb4_unicode_ci = de.evidence_text COLLATE utf8mb4_unicode_ci
+	where is_indicator =1 and  em.project_id=115    and VI.ID > 696 )a) ;
+
+update document_code_evidence_map set is_active=null where id in (	select distinct id from (SELECT distinct 
+	    em.member_id AS 'Member ID',
+	    dd.encounter_actual_period_start,
+	    condition_code AS 'ICD Code',
+	    de.evidence_text  ,dcem.id
+	  FROM 
+	    encounter_mst em 
+	  INNER JOIN 
+	    document_mst dm ON dm.encounter_id = em.id
+	  INNER JOIN 
+	    document_dos dd ON dd.document_id = dm.id
+	  LEFT JOIN 
+	    project_mst pm ON pm.id = em.project_id
+	  INNER JOIN 
+	    document_code dc ON dc.document_dos_id = dd.id
+	  LEFT JOIN 
+	    document_code_evidence_map dcem ON dcem.document_code_id = dc.id AND dcem.is_active =1
+	  LEFT JOIN 
+	    document_evidence de ON de.id = dcem.document_evidence_id
+	  inner join 
+	   	claims.vatica_indicator VI on vi.member_id =em.member_id and dos=dd.encounter_actual_period_start and condition_code=icd_code    	
+	where is_indicator =1 and  em.project_id=115 and action  in ('Row Deleted (Step 3)') )a);
+	
+	
+	
+update 	document_code set is_active =null where id in (select distinct id from (	SELECT distinct 
+	    em.member_id AS 'Member ID',
+	    dd.encounter_actual_period_start,
+	    condition_code AS 'ICD Code',dc.id
+	  FROM 
+	    encounter_mst em 
+	  INNER JOIN 
+	    document_mst dm ON dm.encounter_id = em.id
+	  INNER JOIN 
+	    document_dos dd ON dd.document_id = dm.id
+	  LEFT JOIN 
+	    project_mst pm ON pm.id = em.project_id
+	  INNER JOIN 
+	    document_code dc ON dc.document_dos_id = dd.id
+	  LEFT JOIN 
+	    document_code_evidence_map dcem ON dcem.document_code_id = dc.id 
+	  LEFT JOIN 
+	    document_evidence de ON de.id = dcem.document_evidence_id
+	  inner join 
+	   	claims.vatica_indicator VI on vi.member_id =em.member_id and dos=dd.encounter_actual_period_start and condition_code=icd_code    	
+	where is_indicator =1 and  em.project_id=115 and action  in ('Row Deleted (Step 3)'))a) ;
+
+
+
+SELECT DISTINCT 
+    vi.member_id,
+    vi.dos,
+    vi.icd_code,
+    vi.removed_indicator,action
+FROM 
+    claims.vatica_indicator vi
+LEFT JOIN (
+    SELECT 
+        em.member_id,
+        dd.encounter_actual_period_start AS dos,
+        dc.condition_code AS icd_code,
+        de.evidence_text AS removed_indicator
+    FROM 
+        encounter_mst em 
+    INNER JOIN 
+        document_mst dm ON dm.encounter_id = em.id
+    INNER JOIN 
+        document_dos dd ON dd.document_id = dm.id
+    LEFT JOIN 
+        project_mst pm ON pm.id = em.project_id
+    INNER JOIN 
+        document_code dc ON dc.document_dos_id = dd.id
+    LEFT JOIN 
+        document_code_evidence_map dcem ON dcem.document_code_id = dc.id AND dcem.is_active is null
+    LEFT JOIN 
+        document_evidence de ON de.id = dcem.document_evidence_id
+    INNER JOIN 
+        claims.vatica_indicator vi_inner 
+        ON vi_inner.member_id = em.member_id 
+        AND vi_inner.dos = dd.encounter_actual_period_start 
+        AND vi_inner.icd_code = dc.condition_code AND     
+        vi_inner.removed_indicator COLLATE utf8mb4_unicode_ci = de.evidence_text COLLATE utf8mb4_unicode_ci
+        WHERE  is_indicator = 1 
+        AND em.project_id = 115
+       
+) matched
+ON 
+    vi.member_id = matched.member_id AND
+    vi.dos = matched.dos AND
+    vi.icd_code = matched.icd_code AND
+    vi.removed_indicator COLLATE utf8mb4_unicode_ci = matched.removed_indicator COLLATE utf8mb4_unicode_ci
+WHERE 
+    matched.member_id IS NULL ;
+    
+ 

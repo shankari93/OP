@@ -1,0 +1,114 @@
+ use ra_prospective_apigateway; 
+INSERT INTO document_code_cms_hcc_v28_group_map (document_code_id,cms_hcc_v28_group_name,cms_hcc_v28_group_description,IS_ACTIVE,CREATED_BY,UPDATED_BY) SELECT DISTINCT ID,CONCAT('HCC',hcc_group),REPLACE(REPLACE(hcc_desc, CHAR(13), ''), CHAR(10), ''),1,1,1 FROM ( SELECT distinct
+    member_id AS 'Member ID',pm.name,patient_first_name,
+    dd.encounter_actual_period_start AS d_dos,
+    condition_code AS 'ICD Code',
+    claim_status AS Category, hcc_group,hcc_desc,dc.id,ENCOUNTER_STATUS_ID
+    
+  FROM 
+    encounter_mst em 
+  INNER JOIN 
+    document_mst dm ON dm.encounter_id = em.id
+  INNER JOIN 
+    document_dos dd ON dd.document_id = dm.id
+  LEFT JOIN 
+    project_mst pm ON pm.id = em.project_id
+  INNER JOIN 
+    document_code dc ON dc.document_dos_id = dd.id
+   LEFT JOIN 
+    document_code_cms_hcc_v28_group_map cch ON cch.document_code_id = dc.id AND cch.is_active = 1
+ LEFT JOIN 
+     HCC_SERVICE.hcc_v28_24 HC ON replace(dc.condition_CODE,'.','')=HC.CODE AND DD.ENCOUNTER_ACTUAL_PERIOD_START BETWEEN '2024-08-30' AND '2024-09-30'
+  LEFT JOIN 
+     ENCOUNTER_STATUS_MAP ES ON ES.ENCOUNTER_ID=EM.ID AND PROCESS_ID=1 
+  WHERE  
+    ( hcc_group is not null  and  cms_hcc_v28_group_name is null  ) and pm.client_id <> 9 and 
+    em.is_active=1  )a order by 1;
+    
+    
+ use ra_audit_apigateway;  
+ 
+ 
+INSERT INTO document_code_cms_hcc_v28_group_map (document_code_id,cms_hcc_v28_group_name,cms_hcc_v28_group_description,IS_ACTIVE,CREATED_BY,UPDATED_BY) SELECT DISTINCT ID,CONCAT('HCC',hcc_group),REPLACE(REPLACE(hcc_desc, CHAR(13), ''), CHAR(10), ''),1,1,1 FROM (
+  
+ 
+    SELECT distinct
+    pm.name PROJ,dm.name ,
+    dd.encounter_actual_period_start AS d_dos,
+    condition_code AS 'ICD Code',
+    claim_status AS Category, hcc_group,hcc_desc,dc.id
+    
+  FROM 
+    encounter_mst em 
+  INNER JOIN 
+    document_mst dm ON dm.encounter_id = em.id
+  INNER JOIN 
+    document_dos dd ON dd.document_id = dm.id
+  LEFT JOIN 
+    project_mst pm ON pm.id = em.project_id
+  INNER JOIN 
+    document_code dc ON dc.document_dos_id = dd.id
+   LEFT JOIN 
+    document_code_cms_hcc_v28_group_map cch ON cch.document_code_id = dc.id AND cch.is_active = 1
+ LEFT JOIN 
+     HCC_SERVICE.hcc_v28_24 HC ON replace(dc.condition_CODE,'.','')=HC.CODE AND DD.ENCOUNTER_ACTUAL_PERIOD_START BETWEEN '2024-08-30' AND '2024-09-30'
+  WHERE  
+    ( hcc_group is not null  and  cms_hcc_v28_group_name is null  ) and  
+    em.is_active=1  AND DD.ENCOUNTER_ACTUAL_PERIOD_START BETWEEN '2024-08-30' AND '2024-09-30' and dM.created_date between '2025-06-01' and '2025-06-10')a;
+    
+    
+    
+    
+    
+    
+    
+INSERT INTO cm_code_cms_hcc_v28_group_map (cm_code_id,cms_hcc_v28_group_name,cms_hcc_v28_group_desc,IS_ACTIVE,CREATED_BY,UPDATED_BY) SELECT DISTINCT ID,CONCAT('HCC',hcc_group),REPLACE(REPLACE(hcc_desc, CHAR(13), ''), CHAR(10), ''),1,1,1 FROM ( SELECT distinct
+    member_id AS 'Member ID',pm.name,patient_first_name,
+    ed.encounter_actual_period_start AS d_dos,
+    condition_code AS 'ICD Code',
+    claim_status AS Category, hcc_group,hcc_desc,cm.id
+    
+  FROM 
+    encounter_mst em 
+   INNER JOIN 
+    encounter_dos ed ON ed.encounter_id = em.id
+  LEFT JOIN 
+    project_mst pm ON pm.id = em.project_id
+  INNER JOIN 
+    cm_code cm ON cm.encounter_dos_id = ed.id and cm.is_active=1
+   LEFT JOIN 
+    cm_code_cms_hcc_v28_group_map cch ON cm_code_id = cm.id AND cch.is_active = 1
+ LEFT JOIN 
+     HCC_SERVICE.hcc_v28_24 HC ON replace(cm.condition_CODE,'.','')=HC.CODE 
+  WHERE  
+    ( hcc_group is not null  and  cms_hcc_v28_group_name is null  )  and pm.name in ('SouthwestCare_060925-061525','SouthwestCare_060225-060825') and 
+    em.is_active=1  and ed.ENCOUNTER_ACTUAL_PERIOD_START BETWEEN '2024-08-30' AND '2024-09-30' and cm.created_date between '2025-06-01' and '2025-06-10'  )a order by 1;
+    
+    
+
+INSERT INTO cm_code_cms_hcc_v28_group_map (cm_code_id,cms_hcc_v28_group_name,cms_hcc_v28_group_desc,IS_ACTIVE,CREATED_BY,UPDATED_BY) SELECT DISTINCT ID,CONCAT('HCC',hcc_group),REPLACE(REPLACE(hcc_desc, CHAR(13), ''), CHAR(10), ''),1,1,1 FROM (    
+    
+    SELECT distinct
+    pm.name PROJ,patient_first_name,DM.NAME,
+    ed.encounter_actual_period_start AS d_dos,
+    condition_code AS 'ICD Code',
+    claim_status AS Category, hcc_group,hcc_desc,cm.id
+    
+  FROM 
+    encounter_mst em 
+   INNER JOIN 
+   DOCUMENT_MST DM ON DM.ENCOUNTER_ID=EM.ID
+   INNER JOIN 
+    encounter_dos ed ON ed.encounter_id = em.id
+  LEFT JOIN 
+    project_mst pm ON pm.id = em.project_id
+  INNER JOIN 
+    cm_code cm ON cm.encounter_dos_id = ed.id and cm.is_active=1
+   LEFT JOIN 
+    cm_code_cms_hcc_v28_group_map cch ON cm_code_id = cm.id AND cch.is_active = 1
+ LEFT JOIN 
+     HCC_SERVICE.hcc_v28_24 HC ON replace(cm.condition_CODE,'.','')=HC.CODE 
+  WHERE  
+    ( hcc_group is not null  and  cms_hcc_v28_group_name is null  ) and 
+    em.is_active=1  and ed.ENCOUNTER_ACTUAL_PERIOD_START BETWEEN '2024-08-30' AND '2024-09-30' and cm.created_date between '2025-06-01' and '2025-06-10'  )a order by 1;
+    
