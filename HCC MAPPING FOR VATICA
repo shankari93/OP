@@ -1,0 +1,114 @@
+SELECT * 
+FROM (
+    SELECT  
+        u.*, 
+
+        -- V28 HCC Codes
+        REPLACE(sq1.V28_HCC1, 'HCC', '') AS 'V28_HCC1',
+        CASE 
+            WHEN sq1.V28_HCC1 = sq1.V28_HCC2 THEN NULL 
+            ELSE REPLACE(sq1.V28_HCC2, 'HCC', '') 
+        END AS 'V28_HCC2',
+
+        -- RxHCC Codes
+        REPLACE(sq1.RXHCC1, 'RXHCC', '') AS 'V08_RX_HCC1',
+        CASE 
+            WHEN sq1.RXHCC1 = sq1.RXHCC2 THEN NULL 
+            ELSE REPLACE(sq1.RXHCC2, 'RXHCC', '') 
+        END AS 'V08_RX_HCC2',
+
+      -- V28 HCC Descriptions
+sq1.V28_HCC1_desc AS 'V28_HCC1_Desc',
+CASE 
+    WHEN sq1.V28_HCC1 = sq1.V28_HCC2 THEN NULL 
+    ELSE sq1.V28_HCC2_desc 
+END AS 'V28_HCC2_Desc',
+
+-- RxHCC Descriptions
+sq1.RXHCC1_desc AS 'V08_RX_HCC1_Desc',
+CASE 
+    WHEN sq1.RXHCC1 = sq1.RXHCC2 THEN NULL 
+    ELSE sq1.RXHCC2_desc 
+END AS 'V08_RX_HCC2_Desc'
+
+
+    FROM (
+        SELECT 
+            id,
+
+            -- V28 HCC
+            MAX(CASE WHEN h28 IS NOT NULL THEN h28 END) AS V28_HCC1,
+            MAX(CASE WHEN h28_desc IS NOT NULL THEN h28_desc END) AS V28_HCC1_desc,
+
+            MIN(CASE WHEN h28 IS NOT NULL THEN h28 END) AS V28_HCC2,
+            MIN(CASE WHEN h28_desc IS NOT NULL THEN h28_desc END) AS V28_HCC2_desc,
+
+            -- RxHCC
+            MAX(CASE WHEN rx IS NOT NULL THEN rx END) AS RXHCC1,
+            MAX(CASE WHEN rx_desc IS NOT NULL THEN rx_desc END) AS RXHCC1_desc,
+
+            MIN(CASE WHEN rx IS NOT NULL THEN rx END) AS RXHCC2,
+            MIN(CASE WHEN rx_desc IS NOT NULL THEN rx_desc END) AS RXHCC2_desc
+
+        FROM (
+            SELECT 
+                sh.id,
+                h28.hcc_group AS h28,
+                h28.hcc_desc AS h28_desc,
+                r1.RxHCC AS rx,
+                r1.HCC_DESC AS rx_desc
+            FROM customer_claims.medical_coding_timeline sh
+            LEFT JOIN hcc_rxhcc_mapping.hcc_v28_24 h28 
+                ON h28.code = REPLACE(sh.ICD_10_Code, '.', '')
+            LEFT JOIN hcc_rxhcc_mapping.rxhcc24 r1 
+                ON r1.code = REPLACE(sh.ICD_10_Code, '.', '')
+        ) b 
+        GROUP BY id
+    ) sq1
+    LEFT JOIN customer_claims.medical_coding_timeline u 
+        ON u.id = sq1.id
+) a WHERE V28_HCC1 IS NOT NULL OR  V08_RX_HCC1 IS NOT NULL;
+
+
+
+
+
+
+
+SELECT distinct 
+    sh.*,
+    GROUP_CONCAT(DISTINCT h28.hcc_group SEPARATOR ';') AS H28,
+    GROUP_CONCAT(DISTINCT h28.hcc_desc SEPARATOR ';') AS h28_desc,
+    GROUP_CONCAT(DISTINCT r1.RxHCC SEPARATOR ';') AS rx,
+    GROUP_CONCAT(DISTINCT r1.HCC_DESC SEPARATOR ';') AS rx_desc
+FROM customer_claims.medical_coding_timeline_2 sh
+LEFT JOIN hcc_rxhcc_mapping.hcc_v28_24 h28 
+    ON h28.code = REPLACE(sh.ICD_10_Code, '.', '')
+LEFT JOIN hcc_rxhcc_mapping.rxhcc24 r1 
+    ON r1.code = REPLACE(sh.ICD_10_Code, '.', '')
+GROUP BY sh.id;
+
+
+
+SELECT distinct 
+    sh.*,
+    GROUP_CONCAT(DISTINCT h28.hcc_group SEPARATOR ';') AS H28,
+    GROUP_CONCAT(DISTINCT h28.hcc_desc SEPARATOR ';') AS h28_desc,
+    GROUP_CONCAT(DISTINCT r1.RxHCC SEPARATOR ';') AS rx,
+    GROUP_CONCAT(DISTINCT r1.HCC_DESC SEPARATOR ';') AS rx_desc
+FROM icd_codes sh
+LEFT JOIN hcc_rxhcc_mapping.hcc_v28_24 h28 
+    ON h28.code = REPLACE(sh.code, '.', '')
+LEFT JOIN hcc_rxhcc_mapping.rxhcc24 r1 
+    ON r1.code = REPLACE(sh.Code, '.', '')
+GROUP BY sh.id;
+
+
+
+SELECT 
+    code, 
+    GROUP_CONCAT(DISTINCT REPLACE(REPLACE(CONCAT('RXHCC', h28.RxHCC), '\n', ''), '\r', '') SEPARATOR ';') AS RXHCC,
+    GROUP_CONCAT(DISTINCT REPLACE(REPLACE(hcc_desc, '\n', ''), '\r', '') SEPARATOR ';') AS RXHCC_DESC
+FROM hcc_rxhcc_mapping.rxhcc24 h28
+GROUP BY code;
+

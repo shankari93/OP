@@ -1,0 +1,334 @@
+create table upmc_del 
+SELECT DISTINCT
+    main_query.File_Name AS 'File Name',
+    main_query.completed_on AS 'Completed On',
+    main_query.claim_id AS 'Claim Id',
+    main_query.member_id AS 'Member id',
+    REPLACE(main_query.main_query.member_full_name, '_', ' ') AS 'Member Full Name',
+    main_query.DOB AS DOB,
+    main_query.age AS Age,
+    main_query.gender AS Gender,
+    main_query.Visit_Type AS 'Visit Type',
+    main_query.from_dos AS 'From DOS',
+    main_query.from_dos AS 'To DOS',
+    dos,    
+    COALESCE(
+        REGEXP_SUBSTR(dos_comment, '[0-9]{10}'),
+        CASE WHEN LENGTH(main_query.npi) <> 10 THEN NULL ELSE main_query.npi END
+    ) AS 'Provider ID', 
+    main_query.Provider_Name AS 'Provider Name',  
+    COALESCE(
+        REGEXP_SUBSTR(dos_comment, '\\b[0-9]{9}\\b'),
+        CASE WHEN LENGTH(main_query.tin) <> 9 THEN NULL ELSE main_query.tin END
+    ) AS 'Provider TIN',
+    CASE
+        WHEN main_query.FROM_DOS IS NULL THEN (
+            SELECT TRIM(dic.comments)
+            FROM encounter_mst em
+            INNER JOIN discussion_mst di ON di.encounter_id = em.id
+            INNER JOIN discussion_comment dic ON dic.discussion_id = di.id
+            WHERE main_query.id = em.id AND di.is_active = 1
+            ORDER BY dic.created_date DESC
+            LIMIT 1
+        )
+       WHEN main_query.RESULTS = 'DELETE' THEN main_query.code_comment
+        ELSE main_query.DOS_COMMENT
+    END AS 'Comment Field 1'
+   ,
+    
+    GROUP_CONCAT(DISTINCT main_query.meat SEPARATOR ',') AS 'Comment Field 2',
+    
+    REPLACE(main_query.code, '.', '') AS Diag,
+    REPLACE(main_query.HCC1, 'HCC', '') AS 'V24 HCC1',
+       CASE
+        WHEN main_query.HCC1 = main_query.HCC2 THEN NULL
+        ELSE REPLACE(main_query.HCC2, 'HCC', '')
+    END AS 'V24 HCC2',
+    REPLACE(main_query.V28_HCC1, 'HCC', '') AS 'V28 HCC1',
+    CASE
+        WHEN main_query.V28_HCC1 = main_query.V28_HCC2 THEN NULL
+        ELSE REPLACE(main_query.V28_HCC2, 'HCC', '')
+    END AS 'V28 HCC2',    
+    REPLACE(main_query.RXHCC1, 'RXHCC', '') AS 'V08 RX HCC1',
+    
+    CASE
+        WHEN main_query.RXHCC1 = main_query.RXHCC2 THEN NULL
+        ELSE REPLACE(main_query.RXHCC2, 'RXHCC', '')
+    END AS 'V08 RX HCC2',
+     main_query.Results,
+    NULL AS 'HealthPlan ID'
+  
+
+FROM (
+    SELECT
+        e.project_id,
+        p.name AS proj,
+        e.id AS id,
+        d.name AS file_name,        
+       DATE_FORMAT(es.last_coding_date, '%m/%d/%Y') AS completed_on,
+        '' AS claim_id,
+        d.patient_identifier AS member_id,
+        patient_first_name AS member_full_name,
+        DATE_FORMAT(e.patient_birth_date, '%m/%d/%Y') AS DOB,
+        TIMESTAMPDIFF(YEAR, e.patient_birth_date, ED.encounter_actual_period_start) AS age,
+        e.patient_gender AS gender,
+        v.name AS Visit_Type,
+        DATE_FORMAT(ed.encounter_actual_period_start, '%m/%d/%Y') AS From_DOS,
+        ed.encounter_actual_period_start AS dos,
+        ed.dos_status,
+        ed.encounter_address_hospital_name AS hospital_name,
+        ed.encounter_practitioner_identifier AS npi,
+        ed.encounter_practitioner_first_name AS provider_first_name,
+        ed.encounter_practitioner_last_name AS provider_last_name,
+        
+        CONCAT(
+            ed.encounter_practitioner_first_name,
+            CASE
+                WHEN ed.encounter_practitioner_last_name IS NOT NULL THEN CONCAT(', ', ed.encounter_practitioner_last_name)
+                ELSE ''
+            END
+        ) AS Provider_Name,
+        
+        COALESCE(
+            GROUP_CONCAT(DISTINCT ec.comment SEPARATOR ', '),
+            GROUP_CONCAT(DISTINCT
+                CASE
+                    WHEN esc.standard_comment = 'Other/Enter your own text' THEN ed.comment
+                    ELSE esc.standard_comment
+                END SEPARATOR ','
+            )
+        ) AS 'DOS_COMMENT',
+        
+        CASE
+            WHEN rr.name = 'ENTER_SPECIFIC_REASON' THEN c.reject_reason_description
+            ELSE rr.name
+        END AS code_comment,
+        
+        LPAD(CAST(ed.tin AS CHAR), 9, '0') AS tin,
+        c.condition_code AS code,
+        MAX(CASE WHEN hcc_group_name IS NOT NULL THEN hcc_group_name END) AS HCC1,
+        MIN(CASE WHEN hcc_group_name IS NOT NULL THEN hcc_group_name END) AS HCC2,
+        MAX(CASE WHEN cms_hcc_v28_group_name IS NOT NULL THEN cms_hcc_v28_group_name END) AS V28_HCC1,
+        MIN(CASE WHEN cms_hcc_v28_group_name IS NOT NULL THEN cms_hcc_v28_group_name END) AS V28_HCC2,
+        MAX(CASE WHEN cr.rxhcc_hcc_group_name IS NOT NULL THEN cr.rxhcc_hcc_group_name END) AS RXHCC1,
+        MIN(CASE WHEN cr.rxhcc_hcc_group_name IS NOT NULL THEN cr.rxhcc_hcc_group_name END) AS RXHCC2,
+        de.evidence_text AS evidence,
+        de1.evidence_text AS meat,
+        CASE
+            WHEN c.claim_code_id IS NOT NULL AND c.claim_status = 'CLAIMED' AND c.status = 'ACCEPTED' THEN 'MATCH'
+            WHEN c.claim_code_id IS NOT NULL AND c.claim_status = 'CLAIMED' AND c.status = 'REJECTED' THEN 'DELETE'
+            WHEN c.claim_code_id IS NOT NULL AND c.claim_status = 'OVERCLAIMED' AND c.status = 'ACCEPTED' THEN 'MATCH'
+            WHEN c.claim_code_id IS NOT NULL AND c.claim_status = 'OVERCLAIMED' AND c.status = 'REJECTED' THEN 'DELETE'
+            WHEN c.claim_code_id IS NULL AND c.claim_status IN ('CLAIMED', 'OVERCLAIMED') AND c.status = 'ACCEPTED' THEN 'ADD'
+            WHEN c.claim_code_id IS NULL AND c.claim_status IN ('CLAIMED', 'OVERCLAIMED') AND c.status = 'REJECTED' THEN 'IGNORE'
+            WHEN c.claim_status = 'UNCLAIMED' AND c.status = 'ACCEPTED' THEN 'ADD'
+            WHEN c.claim_status IS NULL AND c.status = 'ACCEPTED' THEN 'UNLINKED'
+            ELSE NULL
+        END AS Results
+        FROM
+        encounter_mst e
+        INNER JOIN document_mst d ON e.id = d.encounter_id
+        INNER JOIN encounter_status_map es ON es.encounter_id = e.id
+        LEFT JOIN user_details ud ON ud.id = es.user_details_id
+        LEFT JOIN encounter_dos ed ON ed.encounter_id = e.id AND ed.is_Active = 1 AND ed.process_id = 2 AND ed.status = 'Accepted'
+        LEFT JOIN encounter_dos_comment ec ON ec.encounter_dos_id = ed.id AND ec.encounter_id = e.id
+        LEFT JOIN encounter_dos_standard_comment esc ON esc.encounter_dos_id = ed.id AND esc.encounter_id = e.id
+        LEFT JOIN visit_type_mst v ON v.id = ed.visit_type_id
+        LEFT JOIN document_dos dd ON dd.document_id = d.id AND ed.document_dos_id = dd.id AND claim_document_dos_id = dd.id
+        LEFT JOIN cm_code c ON c.encounter_id = e.id AND c.encounter_dos_id = ed.id AND c.is_active = 1
+            AND (
+                (c.claim_status = 'CLAIMED' AND c.status IN ('ACCEPTED', 'REJECTED')) OR
+                (c.claim_status = 'OVERCLAIMED' AND c.status IN ('ACCEPTED', 'REJECTED')) OR
+                (c.claim_status = 'UNCLAIMED' AND c.status = 'ACCEPTED') OR
+                (c.claim_status IS NULL AND c.status = 'ACCEPTED')
+            )
+            AND c.process_id = 2 AND c.is_suppressed = 0
+        LEFT JOIN document_code dc ON dc.id = c.document_code_id
+        LEFT JOIN project_mst p ON e.project_id = p.id
+        LEFT JOIN cm_code_hcc_group_map ch ON ch.cm_code_id = c.id
+        LEFT JOIN cm_code_cms_hcc_v28_group_map chv ON chv.cm_code_id = c.id
+        LEFT JOIN cm_code_rxhcc_hcc_group_map cr ON cr.cm_code_id = c.id
+            AND (rxhcc_hcc_group_name IS NOT NULL OR hcc_group_name IS NOT NULL OR cms_hcc_v28_group_name IS NOT NULL)
+        LEFT JOIN ra_audit_apigateway.cm_code_evidence_map ccem ON ccem.cm_code_id = c.id AND ccem.is_active = 1
+        LEFT JOIN ra_audit_apigateway.document_evidence de ON de.id = ccem.document_evidence_id
+        LEFT JOIN ra_audit_apigateway.cm_code_meat_evidence_map ccem1 ON ccem1.cm_code_id = c.id AND ccem1.is_active = 1 AND ccem1.meat_category = 'T'
+        LEFT JOIN ra_audit_apigateway.document_evidence de1 ON de1.id = ccem1.document_evidence_id
+        LEFT JOIN document_evidence_coordinates dec_alias ON dec_alias.document_evidence_id = de.id
+        LEFT JOIN cm_code_reject_reason_map ccr ON ccr.cm_code_id = c.id
+        LEFT JOIN reject_reason_mst rr ON rr.id = reject_reason_id
+        
+    WHERE
+        e.is_active = 1
+        AND d.is_active = 1
+        AND encounter_status_id IN (9)
+        AND es.is_active = 1
+        AND es.process_id = 2
+        AND p.id IN (355)
+            
+    GROUP BY
+        e.id,
+        ed.encounter_actual_period_start,
+        ed.dos_status,
+        ed.encounter_practitioner_identifier,
+        c.condition_code,
+        de1.evidence_text
+
+) AS main_query
+
+GROUP BY
+    main_query.file_name,
+    main_query.from_dos,
+    main_query.code,
+    main_query.npI
+ ;
+
+    
+    
+    
+    
+    
+    SELECT DISTINCT 
+    ud.member_id_hpid AS member_id_hpid,U_DIAG.`FILE NAME`,
+    ud.date_service_start AS date_service_start,rendering_provider_npi,
+    ud.icd_coDE,u_diag.RESULTS
+FROM 
+    customer_claims.upmc_claims_hcc ud
+INNER JOIN 
+    ra_audit_apigateway.upmc_del u_match
+    ON u_match.`member id` = ud.member_id_hpid
+    AND u_match.dos = ud.date_service_start
+    
+LEFT JOIN 
+    ra_audit_apigateway.upmc_del u_diag
+    ON u_diag.`member id` = ud.member_id_hpid
+    AND u_diag.dos = ud.date_service_start
+    
+    AND u_diag.`diag` = replace(ud.icd_code,'.','') 
+WHERE 
+    u_diag.`diag` IS  not NULL 
+    AND ud.member_id_hpid IS NOT NULL and deg =1
+    AND ud.date_service_start IS NOT NULL and  (v24_hcc1 is not null or v28_hcc1 is not null or v08_rx_hcc1 is not null) and u_diag.results  in ('MATCH')
+    
+    group by ud.member_id_hpid ,
+    ud.date_service_start ,
+    rendering_provider_npi,
+    U_MATCH.DIAG;
+   
+   
+
+
+
+
+CREATE TABLE UPMC_DEL1
+SELECT
+    `File Name`,
+  `Completed On`,
+   cn,
+   ct,
+   `Member id`,
+  `Member Full Name`,
+  `DOB`,
+  `Age`,
+  `Gender`,
+  `Visit Type`,
+  `From DOS`,
+  `To DOS`,
+  `dos`,
+  `Provider ID`,
+  `Provider Name`,
+  `Provider TIN`,
+  `Comment Field 1`,
+  `Comment Field 2`,
+  `Diag`,
+  `V24 HCC1`,
+  `V24 HCC2`,
+  `V28 HCC1`,
+  `V28 HCC2`,
+  `V08 RX HCC1`,
+  `V08 RX HCC2`,
+  `Results`,
+  `HealthPlan ID`,
+  r,
+  p,
+  poc
+FROM upmc_del UD 
+left join 
+(
+ SELECT DISTINCT 
+    ud.member_id_hpid AS member_id_hpid,
+    ud.date_service_start AS date_service_start,
+    rendering_provider_npi,
+    group_concat(distinct CLAIM_TYPE SEPARATOR ',') ct ,
+    group_concat(distinct CLAIM_NBR SEPARATOR ',') cn,
+    group_concat(distinct revenue_code SEPARATOR ',') R ,
+    GROUP_CONCAT(DISTINCT PROCEDURE_PRINCIPAL SEPARATOR ',') p ,
+     GROUP_CONCAT(DISTINCT CLAIM_PLACE_OF_SERVICE  SEPARATOR ',') POC
+
+FROM 
+    customer_claims.upmc_claims_hcc ud
+INNER JOIN 
+    ra_audit_apigateway.upmc_del u_match
+    ON 
+    u_match.`member id` = ud.member_id_hpid
+    AND u_match.dos = ud.date_service_start
+    and rendering_provider_npi=`provider id`
+    WHERE DEG=1 
+    GROUP BY member_id_hpid,date_service_start,rendering_provider_npi
+)UF 
+ON UD.`MEMBER ID`= UF.MEMBER_ID_HPID and 
+UD.DOS=UF.date_service_start and 
+rendering_provider_npi=`provider id`
+union   all 
+SELECT DISTINCT u_match.`File Name`,
+      u_match.`Completed On`,
+      group_concat(distinct CLAIM_NBR SEPARATOR ',') CN ,
+      CLAIM_TYPE,
+    ud.member_id_hpid AS member_id_hpid,
+    u_match.`Member Full Name`,
+    u_match.DOB AS DOB,
+    u_match.age AS Age,
+    u_match.gender AS Gender,
+    u_match. `Visit Type`,
+    u_match.`From DOS`,
+    u_match.`To DOS`,
+    ud.date_service_start AS date_service_start,
+    rendering_provider_npi 'Provider ID',
+    u_match.`Provider Name`,
+    u_match.`Provider TIN`,
+   NULL,
+    u_match.`Comment Field 2`,
+     REPLACE(ud.icd_code,'.',''),
+     V24_HCC1,
+     V24_HCC2,
+     V28_HCC1,
+     V28_HCC2,
+     V08_RX_HCC1,
+     V08_RX_HCC2,
+     'DELETE',
+     NULL,
+     group_concat(distinct revenue_code SEPARATOR ',') R ,
+     GROUP_CONCAT(DISTINCT PROCEDURE_PRINCIPAL SEPARATOR ',') p ,
+     GROUP_CONCAT(DISTINCT CLAIM_PLACE_OF_SERVICE  SEPARATOR ',') POC
+FROM 
+    customer_claims.upmc_claims_hcc ud
+INNER JOIN 
+    ra_audit_apigateway.upmc_del u_match
+    ON u_match.`member id` = ud.member_id_hpid
+    AND u_match.dos = ud.date_service_start
+    AND u_match.`Provider ID`=rendering_provider_npi
+LEFT JOIN 
+    ra_audit_apigateway.upmc_del u_diag
+    ON u_diag.`member id` = ud.member_id_hpid
+    AND u_diag.dos = ud.date_service_start
+    AND u_diag.`diag` = replace(ud.icd_code,'.','')
+WHERE 
+    u_diag.`diag` IS   NULL 
+    AND ud.member_id_hpid IS NOT NULL and deg =1
+    AND ud.date_service_start IS NOT NULL and  (v24_hcc1 is not null or v28_hcc2 is not null or v08_rx_hcc1 is not null) 
+    group by ud.member_id_hpid ,
+    ud.date_service_start ,
+    rendering_provider_npi,
+    ud.icd_code;
+
+
+
