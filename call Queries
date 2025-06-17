@@ -1,0 +1,156 @@
+call GetDemographic_Data('2025-06-11') ;
+call GetChart_Data('2025-06-11') ;
+call GetChart_RecentActivity('2025-06-11') ;
+call GetCoderData('2025-06-11') ;
+call GetDosData_1('2025-06-11') ;
+call GetDosEvidence_1('2025-06-11') ;
+call GetCodes_1('2025-06-11') ;
+call GetCodesEvidences_1('2025-06-11') ;
+call GetMeat_1('2025-06-11') ;
+call GetRejectReason('2025-06-11') ;
+
+truncate table   dos_reject_reason_SOURCE;
+ Insert into dos_reject_reason_SOURCE(encounter_id,document_id,dos,reject_reason)
+select * from (Select DISTINCT  e.id enc_id,dm.id,ed.encounter_actual_period_start as DOS,
+CASE WHEN r.display_name = 'Others / Enter a specific reason' THEN ed.reject_Reason_description ELSE coalesce(r.display_name,ed.reject_Reason_description) END as reject_reason
+ from ra_audit_apigateway.encounter_mst e 
+ inner join ra_audit_apigateway.encounter_status_map es on es.encounter_id=e.id 
+ inner join ra_audit_apigateway.document_mst dm on dm.encounter_id = e.id
+ inner join ra_audit_apigateway.encounter_dos ed on ed.encounter_id=e.id AND ed.process_id = (SELECT MAX(process_id) FROM ra_audit_apigateway.encounter_dos WHERE encounter_id = e.id and encounter_status_id in (8,9)) and ed.is_active=1
+ left join ra_audit_apigateway.document_dos dd on dd.id = ed.document_dos_id and dd.document_id = dm.id and dd.is_active =1 
+inner join ra_audit_apigateway.encounter_dos_reject_reason_map er ON ed.id = er.encounter_dos_id
+inner join ra_audit_apigateway.dos_reject_reason_mst r on r.id = er.dos_reject_reason_id
+where e.is_active=1 and dm.is_active = 1 and ed.is_active=1 and er.is_active = 1 and encounter_status_id in (8,9) and ES.UPDATED_DATE >'2025-06-11' )a where reject_reason is not null;
+
+UPDATE dos_data_source d
+	  inner join  nlp_v1_service.request_mst r on r.token= d.token
+	  inner join  nlp_v1_service.client_mst c on r.client_id=c.id
+	  SET d.client_code = c.client_code, d.project_id = r.project_id, d.request_id = r.id
+	  WHERE d.token = r.token ;  
+
+use feedback_db_audit;
+
+delete from codes_meat where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from codes_evidences where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from codes where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from dos_data where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from coder where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from chart_recent_activity where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from chart_data where document_id in (select document_id from feedback_db_source_audit.chart_data_source);
+delete from dos_evidences where document_id in (select document_id from feedback_db_source_audit.dos_evidences_source);
+delete from dos_reject_reason where document_id in (select document_id from feedback_db_source_audit.dos_reject_reason_source);
+
+
+call sp_upsert_feedbackdb_1();
+
+call upsert_reject_reason();
+
+
+UPDATE feedback_db_audit.dos_data d
+	INNER JOIN nlp_v1_service.request_mst r ON d.request_id = r.id
+	INNER JOIN nlp_v1_service.dos_mst dd ON r.id = dd.request_id
+	INNER JOIN nlp_v1_service.audit_process_detail a ON a.request_id = r.id AND a.dos_id = dd.id
+	SET d.token_id = a.core_service_request_id
+	WHERE dd.encounter_actual_period_start = d.dos 
+	  AND (
+	    (d.doc_npi = dd.encounter_practitioner_identifier AND d.doc_npi IS NOT NULL) 
+	    OR (d.doc_npi = -1 AND dd.encounter_practitioner_identifier IS NULL) or ( a.encounter_practitioner_identifier=d.doc_npi) or (a.encounter_practitioner_identifier=d.npi)
+	  ) where d.created_date like '2025-05-25%'
+	 
+update dos_data d inner join ra_audit_apigateway.project_mst p on p.id=d.project_id set project_name_nlp=p.name where project_name_nlp is null;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+	
+=======================================
+
+
+
+CREATE DEFINER=`uazureuser`@`%` PROCEDURE `GetRejectReason`(IN input DATE)
+BEGIN
+    
+    SET @OLD_FOREIGN_KEY_CHECKS = @@FOREIGN_KEY_CHECKS;
+    SET FOREIGN_KEY_CHECKS = 0;
+
+    TRUNCATE TABLE codes_reject_reason_source;
+
+    SET FOREIGN_KEY_CHECKS = @OLD_FOREIGN_KEY_CHECKS;
+
+ Insert into codes_reject_reason_source(encounter_id,document_id,dos,npi,doc_npi,coding_system,code,base_code,reject_reason,reject_reason_description)
+ Select DISTINCT  e.id,d.id,coalesce (ed.dos,dd.dos)DOS,COALESCE(ed.npi,dd.npi,'-1'),COALESCE(dd.npi,'-1'),coalesce  (c.icd_version,dc.coding_system_version),
+coalesce  (c.code,dc.code )as code ,coalesce  (c.original_code,dc.code ) as base_code,
+r.display_name as reject_reason, COALESCE(c.reject_Reason_description,'-1')
+ from ra_audit_apigateway.encounter_mst e 
+ inner join ra_audit_apigateway.document_mst d on e.id=d.encounter_id  
+ inner join ra_audit_apigateway.encounter_status_map es on es.encounter_id=e.id 
+ inner join ra_audit_apigateway.encounter_dos ed on ed.encounter_id=e.id AND ed.process_id = (SELECT MAX(process_id) FROM ra_audit_apigateway.encounter_dos WHERE encounter_id = e.id and encounter_status_id in (8,9)) and ed.is_active=1
+ left join ra_audit_apigateway.document_dos dd on dd.document_id=d.id   and ed.document_dos_id=dd.id   and dd.is_active=1
+ inner JOIN  ra_audit_apigateway.cm_code c ON c.encounter_id = e.id and c.encounter_dos_id=ed.id 
+left JOIN ra_audit_apigateway.document_code dc ON c.document_code_id = dc.id and dc.document_dos_id=dd.id
+inner join ra_audit_apigateway.cm_code_reject_reason_map cr ON c.id = cr.cm_code_id
+inner join ra_audit_apigateway.reject_reason_mst r on r.id = cr.reject_reason_id 
+where e.is_active=1 and d.is_active=1 and c.is_active=1 and ed.is_active=1 and cr.is_active = 1 and encounter_status_id in (8,9) ;
+
+
+
+
+ 
+
+ INSERT INTO dos_evidences_source (document_id, DOS,npi,doc_npi,text, begin,page_no,status,top_left_x,top_left_y,top_right_x,top_right_y,bottom_left_x,
+    bottom_left_y,bottom_right_x,bottom_right_y)
+   select * from (Select DISTINCT  d.id as document_id,coalesce (ed.dos,dd.dos)DOS,COALESCE(ed.npi,dd.npi,'-1'),COALESCE(dd.npi,'-1'),de.evidence_text,COALESCE(de.evidence_begin,-1),document_page_no,
+CASE 
+WHEN ed.status ='ACCEPTED' and ed.dos = dd.dos and ed.is_active = 1 and edem.is_active=1 and is_system_suggested=1 then 'SUGGESTED_ACCEPTED'
+WHEN ed.status ='ACCEPTED' and ed.dos = dd.dos and ed.is_active = 1 and edem.is_active is null and is_system_suggested=1 then 'SUGGESTED_REJECTED' 
+WHEN ed.status ='REJECTED ' and ed.dos = dd.dos and ed.is_active = 1 and ( edem.is_active=1 OR edem.is_active is null) and is_system_suggested=1 then 'SUGGESTED_REJECTED' 
+WHEN ed.status ='ACCEPTED' and ed.dos <> dd.dos and ed.is_active = 1 and edem.is_active=1 and is_system_suggested=1 then 'UPDATED_ACCEPTED'
+WHEN ed.status ='ACCEPTED' and ed.dos <> dd.dos and ed.is_active = 1 and edem.is_active is null and is_system_suggested=1 then 'UPDATED_REJECTED' 
+WHEN ed.status ='REJECTED ' and ed.dos <> dd.dos and ed.is_active = 1 and ( edem.is_active=1 OR edem.is_active is null) and is_system_suggested=1 then 'UPDATED_REJECTED' 
+WHEN ed.status ='ACCEPTED' and ed.is_active = 1 and edem.is_active=1 and is_system_suggested =0  then 'ADDED_ACCEPTED'
+WHEN ed.status ='ACCEPTED'  AND (edem.is_active=0 or edem.is_active is null ) and is_system_suggested =0 then 'ADDED_REJECTED'
+WHEN ed.status ='ACCEPTED'  AND ed.is_active is NULL AND edem.is_active = 1 and is_system_suggested =0 then 'ADDED_REJECTED'
+WHEN ed.status ='REJECTED' and  is_system_suggested = 0 then 'ADDED_REJECTED'
+ END AS evidence_status ,top_left_x,top_left_y,top_right_x,top_right_y,bottom_left_x,
+    bottom_left_y,bottom_right_x,bottom_right_y
+  from ra_audit_apigateway.encounter_mst e 
+  inner join ra_audit_apigateway.document_mst d on e.id=d.encounter_id  
+  inner join ra_audit_apigateway.encounter_status_map es on es.encounter_id=e.id
+  inner join ra_audit_apigateway.encounter_dos ed on ed.encounter_id=e.id AND ed.process_id = (SELECT MAX(process_id) FROM ra_audit_apigateway.encounter_status_map WHERE encounter_id = e.id and encounter_status_id in(8,9)) and ed.is_active=1
+  left  join ra_audit_apigateway.document_dos dd on dd.document_id=d.id   and ed.document_dos_id=dd.id  and dd.is_Active=1  
+left join ra_audit_apigateway.encounter_dos_evidence_map edem on edem.encounter_dos_id=ed.id 
+inner join ra_audit_apigateway.document_evidence de on de.id=edem.document_evidence_id
+left join ra_audit_apigateway.document_evidence_coordinates dp on dp.document_evidence_id=de.id
+     where     e.is_active=1 and d.is_active=1 and es.encounter_status_id IN (8,9) and es.updated_date >  '2025-02-20'
+ UNION
+ Select DISTINCT d.id,coalesce (ed.dos,dd.dos) as DOS,COALESCE(ed.npi,dd.npi,'-1'),COALESCE(dd.npi,'-1') ,de.evidence_text,de.evidence_begin,document_page_no,
+case when dd.dos is not null and ed.dos is not null and ed.is_active is null then 'SUGGESTED_UNTOUCHED' 
+ when  dd.dos IS NOT NULL AND ed.dos IS NULL   then 'SUGGESTED_UNTOUCHED'
+end as evidence_status,top_left_x,top_left_y,top_right_x,top_right_y,bottom_left_x,
+    bottom_left_y,bottom_right_x,bottom_right_y
+ from ra_audit_apigateway.encounter_mst e 
+ inner join ra_audit_apigateway.document_mst d on e.id=d.encounter_id  
+ inner join ra_audit_apigateway.encounter_status_map es on es.encounter_id=e.id  
+ inner join ra_audit_apigateway.document_dos dd on dd.document_id=d.id  
+ left  join ra_audit_apigateway.encounter_dos ed on  ed.encounter_id=e.id  and ed.document_dos_id=dd.id AND ed.process_id = (SELECT MAX(process_id) FROM ra_audit_apigateway.encounter_status_map WHERE encounter_id = e.id and encounter_status_id in(8,9)) and ed.is_active=1
+inner join  ra_audit_apigateway.document_dos_evidence_map ddem on ddem.document_dos_id=dd.id 
+inner join ra_audit_apigateway.document_evidence de on de.id=ddem.document_evidence_id 
+left join ra_audit_apigateway.document_evidence_coordinates dp on dp.document_evidence_id=de.id
+where e.is_active=1 and d.is_active=1 and es.encounter_status_id IN (8,9) and( (dd.dos is not null and ed.dos is not null and ed.is_active is null) or (dd.dos is not null and ed.dos is null))  AND  es.updated_date > '2025-06-11' and dd.is_Active=1 order by 1,2,3 ) a where evidence_status is not null;
+
+
+
+
+
